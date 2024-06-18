@@ -6,27 +6,25 @@ using NoLiferClub; // Используем пространство имен м�
 
 public class Program
 {
-    
- 
-        static void Main(string[] args)
-        {
+
+
+    static void Main(string[] args)
+    {
         // Строка подключения к PostgreSQL
         var connectionString = "Host=localhost;Database=cybersportclubdb;Username=polingavaza;Password=1234567;Port=5432";
-            var dbConnection = new DatabaseConnection(connectionString);
-
-            // Начинаем с процесса авторизации
-            if (!Login(dbConnection))
-            {
-                Console.WriteLine("Неверный логин или пароль. Выход.");
-                return; 
-            }
-
-            //основной цикл программы
-            while (true)
-            {
+        var dbConnection = new DatabaseConnection(connectionString);
+        //Авторизация пользователя
+        if (!AuthorizeUser(dbConnection))
+        {
+            Console.WriteLine("Авторизация не удалась.");
+            return;
+        }
+        //основной цикл программы
+        while (true)
+        {
             // Выводим меню выбора действий
             Console.WriteLine("1. Регистрация игрока");
-            Console.WriteLine("2. Создание турнира");       
+            Console.WriteLine("2. Создание турнира");
             Console.WriteLine("3. Просмотр результатов турнира");
             Console.WriteLine("4. Удаление турнира");
             Console.WriteLine("5. Поиск турнира с фильтром");
@@ -42,7 +40,7 @@ public class Program
                     break;
                 case "2":
                     CreateTournament(dbConnection); // Вызываем функцию создания турнира
-                    break;    
+                    break;
                 case "3":
                     ViewTournamentResults(dbConnection); // Вызываем функцию просмотра результатов
                     break;
@@ -60,49 +58,65 @@ public class Program
             }
         }
     }
-    static bool Login(DatabaseConnection dbConnection)
+    ////// Функция авторизации пользователя
+    static bool AuthorizeUser(DatabaseConnection dbConnection)
     {
         Console.WriteLine("Введите email:");
-        var email = Console.ReadLine();
+        var email = Console.ReadLine(); // Считываем email игрока
 
         Console.WriteLine("Введите пароль:");
-        var password = Console.ReadLine();
+        var password = Console.ReadLine(); // Считываем пароль игрока
 
-        // Получение хэша пароля из базы данных
-        string storedHash = GetPasswordHashFromDatabase(dbConnection, email);
-
-        // Проверка пароля
-        if (storedHash != null && PasswordHasher.VerifyPassword(password, storedHash))
-        {
-            Console.WriteLine("Вход выполнен успешно!");
-            return true;
-        }
-
-        return false;
-    }
-
-    // Функция для получения хэша пароля из базы данных
-    static string GetPasswordHashFromDatabase(DatabaseConnection dbConnection, string email)
-    {
+        // Открываем подключение к базе данных
         using (var connection = dbConnection.GetConnection())
         {
-            connection.Open();
-
+            // Выполняем запрос на поиск пользователя по email
             using (var cmd = new NpgsqlCommand("SELECT PasswordHash FROM Player WHERE Email = @email", connection))
             {
-                cmd.Parameters.AddWithValue("@email", email);
+                cmd.Parameters.AddWithValue("@email", email); // Добавляем параметр для email
+
+                connection.Open();
 
                 using (var reader = cmd.ExecuteReader())
                 {
-                    if (reader.Read())
+                    try
                     {
-                        return reader.GetString(0);
+
+                        if (reader.Read())
+                        {
+                            // Получаем хеш пароля из базы данных
+                            var storedPasswordHash = reader.GetString(0);
+
+                            // Проверяем, совпадает ли введенный пароль с хешем из базы данных
+                            if (PasswordHasher.VerifyPassword(storedPasswordHash, password))
+                            {
+                                Console.WriteLine("Авторизация прошла успешно!");
+                                return true;
+                            }
+                            else
+                            {
+                                Console.WriteLine("Неверный пароль.");
+                                return false;
+                            }
+                        }
+                        else
+                        {
+                            Console.WriteLine("Пользователь с таким email не найден.");
+                            return false;
+                        }
+                    }
+                    catch (NpgsqlException ex)
+                    {
+                        Console.WriteLine("Ошибка при подключении к базе данных: " + ex.Message);
+                        return false;
+
                     }
                 }
             }
         }
-        return null;
     }
+
+
 
 
     // Функция регистрации игрока
@@ -123,21 +137,30 @@ public class Program
         // Открываем подключение к базе данных
         using (var connection = dbConnection.GetConnection())
         {
-            
-
-            // Выполняем запрос на вставку данных в таблицу Players
-            using (var cmd = new NpgsqlCommand("INSERT INTO Players (Name, Email, PasswordHash) VALUES (@name, @email, @passwordHash)", connection))
+            try
             {
-                cmd.Parameters.AddWithValue("@name", name); // Добавляем параметр для имени
-                cmd.Parameters.AddWithValue("@email", email); // Добавляем параметр для email
-                cmd.Parameters.AddWithValue("@passwordHash", passwordHash); // Добавляем параметр для хеша пароля
+                connection.Open(); // Открываем соединение
+                                   // Выполняем запрос на вставку данных в таблицу Player
+                using (var cmd = new NpgsqlCommand("INSERT INTO Player (Name, Email, PasswordHash) VALUES (@name, @email, @passwordHash)", connection))
+                {
+                    cmd.Parameters.AddWithValue("@name", name); // Добавляем параметр для имени
+                    cmd.Parameters.AddWithValue("@email", email); // Добавляем параметр для email
+                    cmd.Parameters.AddWithValue("@passwordHash", passwordHash); // Добавляем параметр для хеша пароля
 
-                
+
+                    cmd.ExecuteNonQuery(); // Выполняем запрос
+                }
+            }
+            catch (NpgsqlException ex)
+            {
+                Console.WriteLine("Ошибка при подключении к базе данных: " + ex.Message);
+
             }
         }
 
         Console.WriteLine("Игрок зарегистрирован!");
     }
+
 
     // Функция создания турнира
     static void CreateTournament(DatabaseConnection dbConnection)
@@ -215,7 +238,7 @@ public class Program
 
         Console.WriteLine("Турнир создан!");
     }
-        static void DisplayGames(DatabaseConnection dbConnection)
+    static void DisplayGames(DatabaseConnection dbConnection)
     {
         using (var connection = dbConnection.GetConnection())
         {
@@ -237,7 +260,7 @@ public class Program
             catch (NpgsqlException ex)
             {
                 Console.WriteLine("Ошибка при подключении к базе данных: " + ex.Message);
-                
+
             }
         }
     }
@@ -268,7 +291,8 @@ public class Program
         }
     }
 
-    static void ViewTournamentResults(DatabaseConnection dbConnection)
+    //Функция просмотра результатов турнира
+    static void ViewTournamentResults(DatabaseConnection dbConnection) 
     {
         Console.WriteLine("Введите ID турнира:");
         var tournamentId = int.Parse(Console.ReadLine()); // Считываем ID турнира
@@ -377,3 +401,5 @@ public class Program
         }
     }
 }
+
+
